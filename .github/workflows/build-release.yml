@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows:
@@ -15,6 +15,59 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Fix installed workspace paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workspaceRoot = @'
+  let home = std::env::var_os("USERPROFILE").map(PathBuf::from).ok_or_else(|| "USERPROFILE is unavailable".to_string())?;
+  let root = home.join("Documents").join("KDev");
+  fs::create_dir_all(&root).map_err(|e| format!("cannot create KDev workspace: {e}"))?;
+  Ok(root)
+'@
+          $lib = Get-Content -Raw src-tauri/src/lib.rs
+          $oldLib = @'
+fn kdev_root() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("cannot locate KDev executable: {e}"))?;
+    exe.parent().map(Path::to_path_buf).ok_or_else(|| "cannot determine KDev root".into())
+}
+'@
+          $newLib = "fn kdev_root() -> Result<PathBuf, String> {`n$workspaceRoot`n}`n"
+          if (-not $lib.Contains($oldLib)) { throw 'Expected lib.rs installed-root function was not found.' }
+          $lib = $lib.Replace($oldLib, $newLib)
+          Set-Content -NoNewline -Encoding utf8 src-tauri/src/lib.rs $lib
+
+          $project = Get-Content -Raw src-tauri/src/project_tools.rs
+          $oldProject = @'
+fn root() -> Result<PathBuf, String> {
+    std::env::current_exe().map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).ok_or_else(|| "cannot locate KDev root".into())
+}
+'@
+          $newProject = "fn root() -> Result<PathBuf, String> {`n  let home = std::env::var_os(\"USERPROFILE\").map(PathBuf::from).ok_or_else(|| \"USERPROFILE is unavailable\".to_string())?;`n  let root = home.join(\"Documents\").join(\"KDev\");`n  fs::create_dir_all(&root).map_err(|e| format!(\"cannot create KDev workspace: {e}\"))?;`n  Ok(root)`n}`n"
+          if (-not $project.Contains($oldProject)) { throw 'Expected project_tools.rs root function was not found.' }
+          $project = $project.Replace($oldProject, $newProject)
+          Set-Content -NoNewline -Encoding utf8 src-tauri/src/project_tools.rs $project
+
+          $git = Get-Content -Raw src-tauri/src/git.rs
+          $oldGit = @'
+fn root() -> Result<PathBuf, String> {
+    std::env::current_exe().map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).ok_or_else(|| "cannot locate KDev root".into())
+}
+'@
+          $newGit = "fn root() -> Result<PathBuf, String> {`n  let home = std::env::var_os(\"USERPROFILE\").map(PathBuf::from).ok_or_else(|| \"USERPROFILE is unavailable\".to_string())?;`n  let root = home.join(\"Documents\").join(\"KDev\");`n  fs::create_dir_all(&root).map_err(|e| format!(\"cannot create KDev workspace: {e}\"))?;`n  Ok(root)`n}`n"
+          $git = $git.Replace('use std::{path::PathBuf, process::Command};', 'use std::{fs, path::PathBuf, process::Command};')
+          if (-not $git.Contains($oldGit)) { throw 'Expected git.rs root function was not found.' }
+          $git = $git.Replace($oldGit, $newGit)
+          Set-Content -NoNewline -Encoding utf8 src-tauri/src/git.rs $git
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src-tauri/src/lib.rs src-tauri/src/project_tools.rs src-tauri/src/git.rs
+          if (-not (git diff --cached --quiet)) {
+            git commit -m 'fix: store installed KDev workspace in user Documents'
+            git push
+          }
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
