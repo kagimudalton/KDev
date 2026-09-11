@@ -6,6 +6,7 @@ mod git;
 mod security;
 mod runtime;
 mod storage;
+mod project_tools;
 
 #[derive(Serialize)]
 struct PlatformInfo { os: String, arch: String, kdev_root: String }
@@ -134,9 +135,8 @@ fn read_workspace_file(relative_path: String) -> Result<String, String> { fs::re
 fn list_workspace_files() -> Result<Vec<String>, String> { let kdev = kdev_root()?; let root = kdev.join("workspace"); if !root.exists() { return Ok(Vec::new()); } let mut files = Vec::new(); for entry in WalkDir::new(&root).into_iter().filter_map(Result::ok) { if entry.file_type().is_file() { if let Ok(path) = entry.path().strip_prefix(&kdev) { files.push(path.to_string_lossy().replace('\\', "/")); } } } files.sort(); Ok(files) }
 #[tauri::command]
 fn list_projects() -> Result<Vec<String>, String> { let root = kdev_root()?.join("workspace/projects"); if !root.exists() { return Ok(Vec::new()); } let mut projects = Vec::new(); for entry in fs::read_dir(root).map_err(|e| format!("cannot read projects: {e}"))?.filter_map(Result::ok) { if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { if let Some(name) = entry.file_name().to_str() { projects.push(name.to_string()); } } } projects.sort(); Ok(projects) }
-
 #[tauri::command]
 fn storage_status() -> Result<String, String> { storage::storage_snapshot(&kdev_root()?) }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() { tauri::Builder::default().invoke_handler(tauri::generate_handler![platform_info, linux_environment, run_linux_command, run_dev_command, create_file, create_folder, delete_workspace_entry, rename_workspace_entry, create_project, write_workspace_file, read_workspace_file, list_workspace_files, list_projects, git::git_status, security::security_state, security::set_master_password, security::verify_master_password, storage_status]).run(tauri::generate_context!()).expect("error while running KDev"); }
+pub fn run() { tauri::Builder::default().invoke_handler(tauri::generate_handler![platform_info, linux_environment, run_linux_command, run_dev_command, create_file, create_folder, delete_workspace_entry, rename_workspace_entry, create_project, write_workspace_file, read_workspace_file, list_workspace_files, list_projects, storage_status, git::git_status, security::security_state, security::set_master_password, security::verify_master_password, project_tools::project_info, project_tools::install_project_dependencies, project_tools::start_web_preview]).run(tauri::generate_context!()).expect("error while running KDev"); }
