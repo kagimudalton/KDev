@@ -4,12 +4,12 @@ from PIL import Image, ImageDraw
 out_dir = Path("src-tauri/icons")
 out_dir.mkdir(parents=True, exist_ok=True)
 
-sizes = [16, 24, 32, 48, 64, 128, 256]
+sizes = [16, 24, 32, 48, 64, 128, 256, 512]
 images = []
 for size in sizes:
     image = Image.new("RGBA", (size, size), (8, 8, 12, 255))
     draw = ImageDraw.Draw(image)
-    margin = max(1, size // 8)
+    margin = max(2, size // 8)
     draw.rounded_rectangle(
         (margin, margin, size - margin, size - margin),
         radius=max(2, size // 6),
@@ -24,6 +24,9 @@ for size in sizes:
     )
     images.append(image)
 
+# Native Windows icon.
 images[-1].save(out_dir / "icon.ico", format="ICO", sizes=[(s, s) for s in sizes])
+# Square PNG assets for Linux AppImage and other desktop bundlers.
 images[-1].save(out_dir / "icon.png", format="PNG")
-print(f"Generated {out_dir / 'icon.ico'} and {out_dir / 'icon.png'}")
+images[-1].save(out_dir / "icon-512.png", format="PNG")
+print(f"Generated {out_dir / 'icon.ico'}, {out_dir / 'icon.png'}, and {out_dir / 'icon-512.png'}")
