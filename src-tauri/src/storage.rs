@@ -19,11 +19,10 @@ fn filesystem_free_space(path: &Path) -> Result<u64, String> {
             .args(["-Pk", &path.to_string_lossy()])
             .output()
             .map_err(|e| e.to_string())?;
-        let line = output
-            .stdout
-            .is_empty()
-            .then(|| "")
-            .unwrap_or_else(|| String::from_utf8_lossy(&output.stdout).lines().last().unwrap_or(""));
+        let line = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .last()
+            .unwrap_or("");
         let cols: Vec<&str> = line.split_whitespace().collect();
         cols.get(3)
             .and_then(|v| v.parse::<u64>().ok())
