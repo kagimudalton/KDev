@@ -19,10 +19,8 @@ fn filesystem_free_space(path: &Path) -> Result<u64, String> {
             .args(["-Pk", &path.to_string_lossy()])
             .output()
             .map_err(|e| e.to_string())?;
-        let line = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .last()
-            .unwrap_or("");
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let line = stdout.lines().last().unwrap_or("");
         let cols: Vec<&str> = line.split_whitespace().collect();
         cols.get(3)
             .and_then(|v| v.parse::<u64>().ok())
