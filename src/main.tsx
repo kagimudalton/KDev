@@ -1,12 +1,20 @@
-import React from "react";
+import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import SystemCenter from "./SystemCenter";
+import KDevPowerPanel from "./KDevPowerPanel";
 import "./styles.css";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
+function Root() {
+  const [powerOpen, setPowerOpen] = useState(false);
+  return <>
     <App />
     <SystemCenter />
-  </React.StrictMode>
+    <button className="power-launch" onClick={() => setPowerOpen(true)} title="KDev Workspace Control">⌘</button>
+    {powerOpen && <KDevPowerPanel onClose={() => setPowerOpen(false)} />}
+  </>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode><Root /></React.StrictMode>
 );
