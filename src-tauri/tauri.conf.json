@@ -26,9 +26,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["msi", "nsis"],
     "category": "DeveloperTool",
     "shortDescription": "Portable offline-first development environment",
-    "longDescription": "KDev is a portable, offline-first development environment designed to travel with your workspace and runtimes."
+    "longDescription": "KDev is a portable, offline-first development environment designed to travel with your workspace and runtimes.",
+    "icon": ["icons/icon.ico"]
   }
 }
