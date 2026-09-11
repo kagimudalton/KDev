@@ -2,6 +2,11 @@ use serde::Serialize;
 use std::{fs, io::Write, path::{Path, PathBuf}, process::Command};
 use walkdir::WalkDir;
 
+mod git;
+mod security;
+mod runtime;
+mod storage;
+
 #[derive(Serialize)]
 struct PlatformInfo { os: String, arch: String, kdev_root: String }
 #[derive(Serialize)]
@@ -89,10 +94,8 @@ fn create_file(relative_path: String, content: String) -> Result<(), String> {
     if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| format!("cannot create parent directory: {e}"))?; }
     let mut file = fs::File::create(&path).map_err(|e| format!("cannot create file: {e}"))?; file.write_all(content.as_bytes()).map_err(|e| format!("cannot write file: {e}"))?; file.sync_all().map_err(|e| format!("cannot flush file: {e}"))?; Ok(())
 }
-
 #[tauri::command]
 fn create_folder(relative_path: String) -> Result<(), String> { let path = safe_workspace_path(&relative_path)?; if path.exists() { return Err("file or folder already exists".into()); } fs::create_dir_all(path).map_err(|e| format!("cannot create folder: {e}")) }
-
 #[tauri::command]
 fn delete_workspace_entry(relative_path: String) -> Result<(), String> {
     let path = safe_workspace_path(&relative_path)?; let normalized = relative_path.replace('\\', "/");
@@ -100,7 +103,6 @@ fn delete_workspace_entry(relative_path: String) -> Result<(), String> {
     if !path.exists() { return Err("entry does not exist".into()); }
     if path.is_dir() { fs::remove_dir_all(path).map_err(|e| format!("cannot delete folder: {e}")) } else { fs::remove_file(path).map_err(|e| format!("cannot delete file: {e}")) }
 }
-
 #[tauri::command]
 fn rename_workspace_entry(relative_path: String, new_name: String) -> Result<String, String> {
     let path = safe_workspace_path(&relative_path)?; if !path.exists() { return Err("entry does not exist".into()); }
@@ -109,7 +111,6 @@ fn rename_workspace_entry(relative_path: String, new_name: String) -> Result<Str
     fs::rename(&path, &target).map_err(|e| format!("cannot rename entry: {e}"))?;
     let root = kdev_root()?; Ok(target.strip_prefix(root).unwrap_or(&target).to_string_lossy().replace('\\', "/"))
 }
-
 #[tauri::command]
 fn create_project(name: String, template: String) -> Result<Vec<String>, String> {
     let name = safe_project_name(&name)?; let root = kdev_root()?.join("workspace/projects").join(&name); if root.exists() { return Err(format!("project '{name}' already exists")); } fs::create_dir_all(&root).map_err(|e| format!("cannot create project: {e}"))?;
@@ -118,12 +119,11 @@ fn create_project(name: String, template: String) -> Result<Vec<String>, String>
         "web" => vec![("index.html", "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>KDev</title><link rel=\"stylesheet\" href=\"style.css\"></head><body><main><h1>Hello from KDev</h1><p>Your portable web project is ready.</p></main><script src=\"app.js\"></script></body></html>\n"), ("style.css", "body { font-family: system-ui, sans-serif; margin: 3rem; }\n"), ("app.js", "console.log(\"KDev web project ready\");\n"), ("README.md", "# KDev Web Project\n")],
         "react" => vec![("package.json", "{\n  \"name\": \"kdev-react-app\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\"dev\": \"vite\", \"build\": \"vite build\"},\n  \"dependencies\": {\"@vitejs/plugin-react\": \"latest\", \"vite\": \"latest\", \"react\": \"latest\", \"react-dom\": \"latest\"}\n}\n"), ("index.html", "<div id=\"root\"></div><script type=\"module\" src=\"/src/main.jsx\"></script>\n"), ("src/main.jsx", "import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport './style.css';\nfunction App(){ return <h1>KDev React Project</h1>; }\ncreateRoot(document.getElementById('root')).render(<App />);\n"), ("src/style.css", "body { font-family: system-ui, sans-serif; margin: 3rem; }\n"), ("README.md", "# KDev React Project\n")],
         "next" => vec![("package.json", "{\n  \"name\": \"kdev-next-app\",\n  \"private\": true,\n  \"scripts\": {\"dev\": \"next dev\", \"build\": \"next build\", \"start\": \"next start\"},\n  \"dependencies\": {\"next\": \"latest\", \"react\": \"latest\", \"react-dom\": \"latest\"}\n}\n"), ("app/page.jsx", "export default function Page(){ return <main><h1>KDev Next.js Project</h1></main>; }\n"), ("app/layout.jsx", "export default function Layout({children}){ return <html><body>{children}</body></html>; }\n"), ("README.md", "# KDev Next.js Project\n")],
-        "typescript" => vec![("main.ts", "const message: string = 'Hello from KDev TypeScript';\nconsole.log(message);\n") , ("README.md", "# KDev TypeScript Project\n")],
+        "typescript" => vec![("main.ts", "const message: string = 'Hello from KDev TypeScript';\nconsole.log(message);\n"), ("README.md", "# KDev TypeScript Project\n")],
         _ => vec![("README.md", "# KDev Project\n\nCreated with KDev.\n")],
     };
     let mut created = Vec::new(); for (relative, content) in files { let path = root.join(relative); if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| format!("cannot create project directory: {e}"))?; } let mut file = fs::File::create(&path).map_err(|e| format!("cannot create {relative}: {e}"))?; file.write_all(content.as_bytes()).map_err(|e| format!("cannot write {relative}: {e}"))?; file.sync_all().map_err(|e| format!("cannot flush {relative}: {e}"))?; created.push(format!("workspace/projects/{name}/{relative}")); } Ok(created)
 }
-
 #[tauri::command]
 fn write_workspace_file(relative_path: String, content: String) -> Result<(), String> {
     let path = safe_workspace_path(&relative_path)?; if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| format!("cannot create workspace directory: {e}"))?; } let temp = path.with_extension(format!("kdev-tmp-{}", std::process::id())); { let mut file = fs::File::create(&temp).map_err(|e| format!("cannot create temporary file: {e}"))?; file.write_all(content.as_bytes()).map_err(|e| format!("cannot write file: {e}"))?; file.sync_all().map_err(|e| format!("cannot flush file: {e}"))?; } #[cfg(windows)] if path.exists() { fs::remove_file(&path).map_err(|e| format!("cannot replace existing file: {e}"))?; } fs::rename(&temp, &path).map_err(|e| format!("cannot commit file atomically: {e}"))?; Ok(())
@@ -135,5 +135,8 @@ fn list_workspace_files() -> Result<Vec<String>, String> { let kdev = kdev_root(
 #[tauri::command]
 fn list_projects() -> Result<Vec<String>, String> { let root = kdev_root()?.join("workspace/projects"); if !root.exists() { return Ok(Vec::new()); } let mut projects = Vec::new(); for entry in fs::read_dir(root).map_err(|e| format!("cannot read projects: {e}"))?.filter_map(Result::ok) { if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { if let Some(name) = entry.file_name().to_str() { projects.push(name.to_string()); } } } projects.sort(); Ok(projects) }
 
+#[tauri::command]
+fn storage_status() -> Result<String, String> { storage::storage_snapshot(&kdev_root()?) }
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() { tauri::Builder::default().invoke_handler(tauri::generate_handler![platform_info, linux_environment, run_linux_command, run_dev_command, create_file, create_folder, delete_workspace_entry, rename_workspace_entry, create_project, write_workspace_file, read_workspace_file, list_workspace_files, list_projects]).run(tauri::generate_context!()).expect("error while running KDev"); }
+pub fn run() { tauri::Builder::default().invoke_handler(tauri::generate_handler![platform_info, linux_environment, run_linux_command, run_dev_command, create_file, create_folder, delete_workspace_entry, rename_workspace_entry, create_project, write_workspace_file, read_workspace_file, list_workspace_files, list_projects, git::git_status, security::security_state, security::set_master_password, security::verify_master_password, storage_status]).run(tauri::generate_context!()).expect("error while running KDev"); }
