@@ -35,7 +35,17 @@ fn safe_project_name(name: &str) -> Result<String, String> {
 fn safe_relative_target(relative_path: &str) -> Result<PathBuf, String> { safe_workspace_path(relative_path) }
 
 #[cfg(windows)]
-fn wsl_distros() -> Vec<String> { Command::new("wsl.exe").args(["-l", "-q"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect()).unwrap_or_default() }
+fn wsl_distros() -> Vec<String> {
+    let output = match Command::new("wsl.exe").args(["-l", "-q"]).output() { Ok(o) => o, Err(_) => return Vec::new() };
+    let bytes = &output.stdout;
+    let text = if bytes.len() >= 2 && bytes.chunks_exact(2).all(|c| c[1] == 0) {
+        let units: Vec<u16> = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+    text.lines().map(str::trim).map(|s| s.trim_matches('\u{0}')).filter(|s| !s.is_empty()).map(String::from).collect()
+}
 #[cfg(windows)]
 fn preferred_wsl_distro() -> Option<String> { let distros = wsl_distros(); distros.iter().find(|d| d.to_lowercase().contains("kali")).cloned().or_else(|| distros.first().cloned()) }
 
