@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vite/
+.DS_Store
+Thumbs.db
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Local KDev runtime/workspace data
+workspace/projects/*/.kdev/recovery/
+workspace/.cache/
