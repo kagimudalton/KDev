@@ -7,8 +7,11 @@ use std::{fs, path::PathBuf};
 pub struct SecurityState { pub configured: bool, pub config_path: String }
 
 fn config_path() -> Result<PathBuf, String> {
-    let root = std::env::current_exe().map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).ok_or_else(|| "cannot locate KDev root".to_string())?;
-    Ok(root.join("config").join("security.json"))
+    #[cfg(windows)]
+    let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).ok_or_else(|| "LOCALAPPDATA is unavailable".to_string())?;
+    #[cfg(not(windows))]
+    let root = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| "HOME is unavailable".to_string())?.join(".local").join("share");
+    Ok(root.join("KDev").join("config").join("security.json"))
 }
 
 #[tauri::command]
