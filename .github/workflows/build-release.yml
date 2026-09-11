@@ -20,7 +20,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -37,7 +36,7 @@ jobs:
         run: python tools/generate_icon.py
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build Windows installers
         run: npx tauri build --bundles nsis,msi
