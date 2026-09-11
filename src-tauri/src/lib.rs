@@ -7,6 +7,7 @@ mod security;
 mod runtime;
 mod storage;
 mod project_tools;
+mod debugger;
 
 #[derive(Serialize)]
 struct PlatformInfo { os: String, arch: String, kdev_root: String }
@@ -139,4 +140,4 @@ fn list_projects() -> Result<Vec<String>, String> { let root = kdev_root()?.join
 fn storage_status() -> Result<String, String> { storage::storage_snapshot(&kdev_root()?) }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() { tauri::Builder::default().invoke_handler(tauri::generate_handler![platform_info, linux_environment, run_linux_command, run_dev_command, create_file, create_folder, delete_workspace_entry, rename_workspace_entry, create_project, write_workspace_file, read_workspace_file, list_workspace_files, list_projects, storage_status, git::git_status, security::security_state, security::set_master_password, security::verify_master_password, project_tools::project_info, project_tools::install_project_dependencies, project_tools::start_web_preview]).run(tauri::generate_context!()).expect("error while running KDev"); }
+pub fn run() { tauri::Builder::default().invoke_handler(tauri::generate_handler![platform_info, linux_environment, run_linux_command, run_dev_command, create_file, create_folder, delete_workspace_entry, rename_workspace_entry, create_project, write_workspace_file, read_workspace_file, list_workspace_files, list_projects, storage_status, git::git_status, security::security_state, security::set_master_password, security::verify_master_password, project_tools::project_info, project_tools::install_project_dependencies, project_tools::start_web_preview, debugger::debugger_capability, debugger::debug_python_command]).run(tauri::generate_context!()).expect("error while running KDev"); }
