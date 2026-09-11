@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <radialGradient id="bg" cx="70%" cy="35%" r="80%">
+      <stop offset="0" stop-color="#25113f"/>
+      <stop offset="0.5" stop-color="#100d19"/>
+      <stop offset="1" stop-color="#050608"/>
+    </radialGradient>
+    <linearGradient id="glow" x1="0" x2="1">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#8b5cf6" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#c084fc" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="35"/></filter>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <ellipse cx="1390" cy="390" rx="520" ry="230" fill="#8b5cf6" opacity=".13" filter="url(#blur)"/>
+  <path d="M-100 830 C380 600 650 1080 1110 790 S1700 570 2050 770" fill="none" stroke="url(#glow)" stroke-width="3"/>
+  <g fill="none" stroke="#a78bfa" opacity=".12">
+    <circle cx="1510" cy="470" r="250"/><circle cx="1510" cy="470" r="330"/><circle cx="1510" cy="470" r="410"/>
+  </g>
+  <text x="110" y="820" fill="#f3f4f6" font-family="ui-monospace,monospace" font-size="74" font-weight="700">KDev Linux Workspace</text>
+  <text x="115" y="885" fill="#a1a1aa" font-family="ui-monospace,monospace" font-size="26">DEBIAN-BASED • OFFLINE-FIRST • LEARNING LAB</text>
+  <text x="115" y="935" fill="#71717a" font-family="ui-monospace,monospace" font-size="20">$ whoami  •  $ pwd  •  $ git status</text>
+</svg>
