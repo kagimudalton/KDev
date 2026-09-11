@@ -5,7 +5,7 @@ import linuxWallpaper from "./assets/kdev-linux-wallpaper.svg";
 
 type FileItem = { path: string; name: string; language: string };
 type PlatformInfo = { os: string; arch: string; kdevRoot: string };
-
+type LinuxEnvironment = { available: boolean; provider: string; detail: string };
 type Workspace = "dev" | "linux";
 
 const starterFiles: FileItem[] = [
@@ -32,10 +32,13 @@ function App() {
   const [activePath, setActivePath] = useState(starterFiles[0].path);
   const [contents, setContents] = useState<Record<string, string>>(starterContent);
   const [platform, setPlatform] = useState<PlatformInfo | null>(null);
+  const [linuxEnv, setLinuxEnv] = useState<LinuxEnvironment | null>(null);
   const [saved, setSaved] = useState(true);
   const [workspace, setWorkspace] = useState<Workspace>("dev");
   const [terminal, setTerminal] = useState("KDev terminal ready. Offline-first workspace initialized.\n");
   const [linuxCommand, setLinuxCommand] = useState("");
+  const [runningCommand, setRunningCommand] = useState(false);
+  const [online, setOnline] = useState(navigator.onLine);
 
   const activeFile = useMemo(() => files.find((file) => file.path === activePath) ?? files[0], [activePath, files]);
 
@@ -43,6 +46,20 @@ function App() {
     invoke<PlatformInfo>("platform_info").then(setPlatform).catch(() => {
       setPlatform({ os: navigator.platform, arch: "browser", kdevRoot: "development mode" });
     });
+    invoke<LinuxEnvironment>("linux_environment").then(setLinuxEnv).catch(() => {
+      setLinuxEnv({ available: false, provider: "browser", detail: "Native Linux execution is available in the desktop build." });
+    });
+  }, []);
+
+  useEffect(() => {
+    const onlineHandler = () => setOnline(true);
+    const offlineHandler = () => setOnline(false);
+    window.addEventListener("online", onlineHandler);
+    window.addEventListener("offline", offlineHandler);
+    return () => {
+      window.removeEventListener("online", onlineHandler);
+      window.removeEventListener("offline", offlineHandler);
+    };
   }, []);
 
   useEffect(() => {
@@ -70,11 +87,20 @@ function App() {
     setSaved(false);
   }
 
-  function runLinuxCommand() {
-    const command = linuxCommand.trim();
-    if (!command) return;
-    setTerminal((value) => `${value}\nlinux@kdev:~$ ${command}\n`);
+  async function runLinuxCommand(command = linuxCommand) {
+    const value = command.trim();
+    if (!value || runningCommand) return;
     setLinuxCommand("");
+    setRunningCommand(true);
+    setTerminal((current) => `${current}\nlinux@kdev:~$ ${value}\n`);
+    try {
+      const output = await invoke<string>("run_linux_command", { command: value });
+      setTerminal((current) => `${current}${output || "(no output)"}\n`);
+    } catch (error) {
+      setTerminal((current) => `${current}KDev: ${String(error)}\n`);
+    } finally {
+      setRunningCommand(false);
+    }
   }
 
   return (
@@ -86,29 +112,30 @@ function App() {
           <button className={workspace === "dev" ? "selected" : ""} onClick={() => setWorkspace("dev")}>DEV</button>
           <button className={workspace === "linux" ? "selected linux" : ""} onClick={() => setWorkspace("linux")}>🐧 LINUX</button>
         </div>
-        <div className="connection"><span className="online-dot" /> {navigator.onLine ? "ONLINE" : "OFFLINE"}</div>
+        <div className="connection"><span className="online-dot" /> {online ? "ONLINE" : "OFFLINE"}</div>
       </header>
 
       {workspace === "linux" ? (
         <main className="linux-workspace" style={{ backgroundImage: `linear-gradient(rgba(5,6,8,.18), rgba(5,6,8,.55)), url(${linuxWallpaper})` }}>
-          <div className="linux-topbar"><strong>🐧 KDev Linux</strong><span>Debian-based workspace</span><span className="linux-spacer" /><span>OFFLINE LAB</span></div>
+          <div className="linux-topbar"><strong>🐧 KDev Linux</strong><span>Debian-based workspace</span><span className="linux-spacer" /><span>{linuxEnv?.available ? linuxEnv.provider.toUpperCase() : "UI / LAB MODE"}</span></div>
           <div className="linux-desktop">
             <div className="linux-card hero-card">
               <div className="eyebrow">LINUX WORKSPACE</div>
               <h1>Feel Linux. Build freely.</h1>
               <p>A dedicated Linux-style workspace for learning, development and controlled security labs.</p>
               <div className="linux-chips"><span>BASH</span><span>GIT</span><span>PYTHON</span><span>SSH</span><span>NETWORKING</span></div>
+              <p className="linux-environment-status">{linuxEnv?.available ? `Environment: ${linuxEnv.detail}` : "No native Linux environment detected. The workspace UI remains available."}</p>
             </div>
             <div className="linux-card terminal-card">
-              <div className="linux-card-title"><span>TERMINAL</span><span>bash</span></div>
+              <div className="linux-card-title"><span>TERMINAL</span><span>{runningCommand ? "running…" : linuxEnv?.provider ?? "detecting"}</span></div>
               <pre>{terminal}</pre>
-              <div className="linux-prompt"><span>linux@kdev:~$</span><input value={linuxCommand} onChange={(event) => setLinuxCommand(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") runLinuxCommand(); }} placeholder="try: pwd" autoFocus /></div>
+              <div className="linux-prompt"><span>linux@kdev:~$</span><input value={linuxCommand} onChange={(event) => setLinuxCommand(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void runLinuxCommand(); }} placeholder={linuxEnv?.available ? "try: pwd" : "Linux environment unavailable"} disabled={!linuxEnv?.available || runningCommand} autoFocus /></div>
             </div>
             <div className="linux-card tool-card">
               <div className="linux-card-title"><span>TOOLBOX</span><span>LOCAL</span></div>
-              <button onClick={() => setTerminal((value) => `${value}\n$ whoami\nkdev-user\n`)}>whoami</button>
-              <button onClick={() => setTerminal((value) => `${value}\n$ pwd\n~/KDev/linux-workspace\n`)}>pwd</button>
-              <button onClick={() => setTerminal((value) => `${value}\n$ git status\nOn branch main\nworking tree clean\n`)}>git status</button>
+              <button onClick={() => void runLinuxCommand("whoami")} disabled={!linuxEnv?.available}>whoami</button>
+              <button onClick={() => void runLinuxCommand("pwd")} disabled={!linuxEnv?.available}>pwd</button>
+              <button onClick={() => void runLinuxCommand("git --version")} disabled={!linuxEnv?.available}>git --version</button>
               <button onClick={() => setTerminal((value) => `${value}\nKDev Security Learning\nUse security tooling only on systems and labs you are authorized to test.\n`)}>Security Learning</button>
             </div>
           </div>
@@ -122,7 +149,7 @@ function App() {
             {files.map((file) => <button key={file.path} className={`tree-file ${file.path === activePath ? "active" : ""}`} onClick={() => setActivePath(file.path)}><span className="file-icon">{file.name.endsWith(".py") ? "◆" : file.name.endsWith(".css") ? "#" : file.name.endsWith(".html") ? "<>" : "JS"}</span>{file.name}</button>)}
           </aside>
           <section className="editor-area">
-            <div className="tabs"><div className="tab active"><span>{activeFile.name}</span><span className="tab-dot">{saved ? "" : "●"}</span><button onClick={saveCurrentFile}>×</button></div></div>
+            <div className="tabs"><div className="tab active"><span>{activeFile.name}</span><span className="tab-dot">{saved ? "" : "●"}</span><button onClick={() => void saveCurrentFile()}>×</button></div></div>
             <div className="editor-wrap"><Editor theme="vs-dark" language={languageFor(activePath)} value={contents[activePath] ?? ""} onChange={updateContent} options={{ automaticLayout: true, minimap: { enabled: true }, fontSize: 14, fontLigatures: true, smoothScrolling: true, tabSize: 2, suggestOnTriggerCharacters: true, quickSuggestions: true }} /></div>
             <div className="terminal"><div className="terminal-tabs"><span className="selected">TERMINAL</span><span>OUTPUT</span><span>PROBLEMS</span><button onClick={() => setTerminal("")}>Clear</button></div><pre>{terminal}</pre></div>
           </section>
