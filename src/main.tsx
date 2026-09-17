@@ -1,11 +1,37 @@
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { loader } from "@monaco-editor/react";
+import * as monaco from "monaco-editor";
+import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
+import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
+import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
+import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import App from "./App";
 import SystemCenter from "./SystemCenter";
 import KDevPowerPanel from "./KDevPowerPanel";
 import FinishCenter from "./FinishCenter";
 import "./styles.css";
+
+// Keep Monaco completely inside the Vite/Tauri bundle. @monaco-editor/react
+// otherwise defaults to the Monaco loader's CDN path, which is unsuitable for
+// an offline desktop IDE and was the reason the editor could remain on
+// "Loading…" when the machine had no network access.
+(self as typeof self & { MonacoEnvironment?: unknown }).MonacoEnvironment = {
+  getWorker(_: unknown, label: string) {
+    if (label === "json") return new jsonWorker();
+    if (label === "css" || label === "scss" || label === "less") return new cssWorker();
+    if (label === "html" || label === "handlebars" || label === "razor") return new htmlWorker();
+    if (label === "typescript" || label === "javascript") return new tsWorker();
+    return new editorWorker();
+  }
+};
+loader.config({ monaco });
+
+// Initialize Monaco once at application startup so the first editor tab does
+// not race the loader/worker setup.
+void loader.init().catch(() => undefined);
 
 type SecurityState = { configured: boolean; config_path: string };
 
