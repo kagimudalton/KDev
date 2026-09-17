@@ -1,11 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import monaco from "@tomjs/vite-plugin-monaco-editor";
 
 export default defineConfig({
-  // Monaco is copied into the built app instead of being loaded from a CDN.
-  // This is required for KDev's offline-first/Tauri desktop build.
-  plugins: [react(), monaco({ local: true })],
+  // Monaco workers are imported directly by the application and bundled by
+  // Vite. This avoids CDN loading and avoids the incompatible third-party
+  // Monaco Vite plugin that previously blocked npm dependency resolution.
+  plugins: [react()],
   clearScreen: false,
   server: {
     port: 1420,
