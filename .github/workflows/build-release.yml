@@ -48,25 +48,37 @@ jobs:
           $nodeGlobal = Join-Path $runtime "node-global"
           $gitRoot = Join-Path $runtime "git"
           $ruffRoot = Join-Path $runtime "ruff"
+          $pythonRoot = Join-Path $runtime "python"
           $tmp = Join-Path $env:RUNNER_TEMP "kdev-runtime"
 
           Remove-Item $runtime -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $bin,$nodeGlobal,$gitRoot,$ruffRoot,$tmp | Out-Null
+          New-Item -ItemType Directory -Force -Path $bin,$nodeGlobal,$gitRoot,$ruffRoot,$pythonRoot,$tmp | Out-Null
 
-          # KDev-owned CPython. It is installed inside the bundle and never
-          # added to the runner or future user's PATH.
-          $pythonInstaller = Join-Path $tmp "python-installer.exe"
-          Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.14.7/python-3.14.7-amd64.exe" -OutFile $pythonInstaller
-          $pythonDir = Join-Path $runtime "python"
-          New-Item -ItemType Directory -Force -Path $pythonDir | Out-Null
-          $pythonArgs = @(
-            "/quiet", "InstallAllUsers=0", "TargetDir=$pythonDir",
-            "Include_pip=1", "Include_launcher=0", "Include_test=0",
-            "PrependPath=0", "SimpleInstall=1"
-          )
-          $p = Start-Process -FilePath $pythonInstaller -ArgumentList $pythonArgs -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "Bundled Python installer failed with exit code $($p.ExitCode)." }
-          Copy-Item (Join-Path $pythonDir "*") $bin -Recurse -Force
+          # Build the managed Python runtime with uv instead of running the
+          # CPython Windows MSI. The MSI returned exit code 1603 on the hosted
+          # runner, while uv installs a relocatable python-build-standalone
+          # distribution directly into the KDev bundle.
+          $uvDir = Join-Path $tmp "uv"
+          New-Item -ItemType Directory -Force -Path $uvDir | Out-Null
+          $env:UV_UNMANAGED_INSTALL = $uvDir
+          $uvInstaller = Join-Path $tmp "install-uv.ps1"
+          Invoke-WebRequest -Uri "https://astral.sh/uv/install.ps1" -OutFile $uvInstaller
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $uvInstaller
+          $uv = Join-Path $uvDir "uv.exe"
+          if (-not (Test-Path $uv)) { throw "uv installer did not produce uv.exe." }
+
+          $env:UV_PYTHON_INSTALL_DIR = $pythonRoot
+          & $uv python install 3.14.7 --install-dir $pythonRoot --force
+          if ($LASTEXITCODE -ne 0) { throw "Managed Python download/install failed." }
+          $pythonExe = Get-ChildItem -Path $pythonRoot -Recurse -Filter "python.exe" -File | Select-Object -First 1
+          if (-not $pythonExe) { throw "Managed Python executable was not found after uv installation." }
+
+          # Seed real pip into the managed interpreter so normal Python project
+          # workflows remain available inside KDev without using host Python.
+          & $uv pip install --python $pythonExe.FullName pip
+          if ($LASTEXITCODE -ne 0) { throw "Managed pip installation failed." }
+          $pythonHome = Split-Path $pythonExe.FullName -Parent
+          Copy-Item (Join-Path $pythonHome "*") $bin -Recurse -Force
 
           # KDev-owned Node.js. npm and npx are included by Node.js itself.
           $nodeZip = Join-Path $tmp "node.zip"
@@ -88,14 +100,9 @@ jobs:
 
           # Ruff is installed into a KDev-owned prefix, then its executable is
           # copied into the managed bin directory.
-          & (Join-Path $bin "python.exe") -m pip install --disable-pip-version-check --no-compile --no-cache-dir --target (Join-Path $ruffRoot "site") ruff
+          & $uv pip install --python $pythonExe.FullName --target (Join-Path $ruffRoot "site") ruff
+          if ($LASTEXITCODE -ne 0) { throw "Bundled Ruff installation failed." }
           $ruffExe = Get-ChildItem -Path $ruffRoot -Recurse -Filter "ruff.exe" -File | Select-Object -First 1
-          if (-not $ruffExe) {
-            # pip --target does not always create a Scripts directory; use the
-            # official Ruff wheel's executable by installing with --prefix as a fallback.
-            & (Join-Path $bin "python.exe") -m pip install --disable-pip-version-check --no-cache-dir --prefix $ruffRoot ruff
-            $ruffExe = Get-ChildItem -Path $ruffRoot -Recurse -Filter "ruff.exe" -File | Select-Object -First 1
-          }
           if (-not $ruffExe) { throw "Bundled Ruff executable was not produced." }
           Copy-Item $ruffExe.FullName (Join-Path $bin "ruff.exe") -Force
 
@@ -108,6 +115,8 @@ jobs:
           # the bundle before Tauri packages it.
           & (Join-Path $bin "python.exe") --version
           if ($LASTEXITCODE -ne 0) { throw "Bundled Python failed its self-test." }
+          & (Join-Path $bin "python.exe") -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled pip failed its self-test." }
           & (Join-Path $bin "node.exe") --version
           if ($LASTEXITCODE -ne 0) { throw "Bundled Node.js failed its self-test." }
           & (Join-Path $bin "npm.cmd") --version
@@ -122,7 +131,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Bundled tsx failed its self-test." }
 
           Write-Host "Managed KDev runtime contents:"
-          Get-ChildItem -Recurse $runtime | Select-Object -First 160 FullName
+          Get-ChildItem -Recurse $runtime | Select-Object -First 200 FullName
 
       - name: Build Windows installers
         run: npx tauri build --bundles nsis,msi
