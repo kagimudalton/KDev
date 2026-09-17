@@ -38,11 +38,7 @@ jobs:
       - name: Install frontend dependencies
         shell: pwsh
         run: |
-          if (Test-Path package-lock.json) {
-            npm ci
-          } else {
-            npm install
-          }
+          if (Test-Path package-lock.json) { npm ci } else { npm install }
 
       - name: Build KDev bundled Windows runtime
         shell: pwsh
@@ -50,33 +46,29 @@ jobs:
           $runtime = "src-tauri/runtime/windows-x64"
           $bin = Join-Path $runtime "bin"
           $nodeGlobal = Join-Path $runtime "node-global"
+          $gitRoot = Join-Path $runtime "git"
+          $ruffRoot = Join-Path $runtime "ruff"
           $tmp = Join-Path $env:RUNNER_TEMP "kdev-runtime"
 
           Remove-Item $runtime -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $bin,$nodeGlobal,$tmp | Out-Null
+          New-Item -ItemType Directory -Force -Path $bin,$nodeGlobal,$gitRoot,$ruffRoot,$tmp | Out-Null
 
-          # Official CPython Windows installer. It is installed into the
-          # bundle directory with pip and without touching the host PATH.
+          # KDev-owned CPython. It is installed inside the bundle and never
+          # added to the runner or future user's PATH.
           $pythonInstaller = Join-Path $tmp "python-installer.exe"
           Invoke-WebRequest -Uri "https://www.python.org/ftp/python/3.14.7/python-3.14.7-amd64.exe" -OutFile $pythonInstaller
           $pythonDir = Join-Path $runtime "python"
           New-Item -ItemType Directory -Force -Path $pythonDir | Out-Null
-          $args = @(
-            "/quiet",
-            "InstallAllUsers=0",
-            "TargetDir=$pythonDir",
-            "Include_pip=1",
-            "Include_launcher=0",
-            "Include_test=0",
-            "PrependPath=0",
-            "SimpleInstall=1"
+          $pythonArgs = @(
+            "/quiet", "InstallAllUsers=0", "TargetDir=$pythonDir",
+            "Include_pip=1", "Include_launcher=0", "Include_test=0",
+            "PrependPath=0", "SimpleInstall=1"
           )
-          $p = Start-Process -FilePath $pythonInstaller -ArgumentList $args -Wait -PassThru
+          $p = Start-Process -FilePath $pythonInstaller -ArgumentList $pythonArgs -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Bundled Python installer failed with exit code $($p.ExitCode)." }
-
           Copy-Item (Join-Path $pythonDir "*") $bin -Recurse -Force
 
-          # Official Node.js Windows x64 portable archive.
+          # KDev-owned Node.js. npm and npx are included by Node.js itself.
           $nodeZip = Join-Path $tmp "node.zip"
           $nodeExtract = Join-Path $tmp "node"
           Invoke-WebRequest -Uri "https://nodejs.org/dist/v22.18.0/node-v22.18.0-win-x64.zip" -OutFile $nodeZip
@@ -84,19 +76,53 @@ jobs:
           $nodeRoot = Get-ChildItem $nodeExtract -Directory | Select-Object -First 1
           Copy-Item (Join-Path $nodeRoot.FullName "*") $bin -Recurse -Force
 
-          # Bundle the TypeScript runner used by KDev's project executor.
-          $env:Path = "$bin;$env:Path"
-          & (Join-Path $bin "npm.cmd") install --prefix $nodeGlobal --no-save tsx@4.20.3
-          if ($LASTEXITCODE -ne 0) { throw "Bundled tsx installation failed." }
+          # Git for Windows: keep the complete portable Git tree so git.exe
+          # retains its DLLs and support files. MinGit is the small official
+          # distribution intended for embedding/portable use.
+          $gitApi = Invoke-RestMethod -Headers @{ "User-Agent" = "KDev-CI" } -Uri "https://api.github.com/repos/git-for-windows/git/releases/latest"
+          $gitAsset = $gitApi.assets | Where-Object { $_.name -like "MinGit-*-64-bit.zip" } | Select-Object -First 1
+          if (-not $gitAsset) { throw "Could not find the latest MinGit 64-bit asset." }
+          $gitZip = Join-Path $tmp "mingit.zip"
+          Invoke-WebRequest -Headers @{ "User-Agent" = "KDev-CI" } -Uri $gitAsset.browser_download_url -OutFile $gitZip
+          Expand-Archive -Path $gitZip -DestinationPath $gitRoot -Force
 
+          # Ruff is installed into a KDev-owned prefix, then its executable is
+          # copied into the managed bin directory.
+          & (Join-Path $bin "python.exe") -m pip install --disable-pip-version-check --no-compile --no-cache-dir --target (Join-Path $ruffRoot "site") ruff
+          $ruffExe = Get-ChildItem -Path $ruffRoot -Recurse -Filter "ruff.exe" -File | Select-Object -First 1
+          if (-not $ruffExe) {
+            # pip --target does not always create a Scripts directory; use the
+            # official Ruff wheel's executable by installing with --prefix as a fallback.
+            & (Join-Path $bin "python.exe") -m pip install --disable-pip-version-check --no-cache-dir --prefix $ruffRoot ruff
+            $ruffExe = Get-ChildItem -Path $ruffRoot -Recurse -Filter "ruff.exe" -File | Select-Object -First 1
+          }
+          if (-not $ruffExe) { throw "Bundled Ruff executable was not produced." }
+          Copy-Item $ruffExe.FullName (Join-Path $bin "ruff.exe") -Force
+
+          # Prettier + tsx are installed into KDev's private Node prefix.
+          $env:Path = "$bin;$(Join-Path $nodeGlobal 'node_modules/.bin');$env:Path"
+          & (Join-Path $bin "npm.cmd") install --prefix $nodeGlobal --no-save prettier@3.6.2 tsx@4.20.3
+          if ($LASTEXITCODE -ne 0) { throw "Bundled Node tooling installation failed." }
+
+          # Self-tests: every execution dependency used by KDev must exist in
+          # the bundle before Tauri packages it.
           & (Join-Path $bin "python.exe") --version
           if ($LASTEXITCODE -ne 0) { throw "Bundled Python failed its self-test." }
           & (Join-Path $bin "node.exe") --version
           if ($LASTEXITCODE -ne 0) { throw "Bundled Node.js failed its self-test." }
-          if (-not (Test-Path (Join-Path $nodeGlobal "tsx.cmd"))) { throw "Bundled tsx.cmd was not produced." }
+          & (Join-Path $bin "npm.cmd") --version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled npm failed its self-test." }
+          & (Join-Path $gitRoot "cmd/git.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled Git failed its self-test." }
+          & (Join-Path $bin "ruff.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled Ruff failed its self-test." }
+          & (Join-Path $nodeGlobal "node_modules/.bin/prettier.cmd") --version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled Prettier failed its self-test." }
+          & (Join-Path $nodeGlobal "node_modules/.bin/tsx.cmd") --version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled tsx failed its self-test." }
 
-          Write-Host "Bundled runtime contents:"
-          Get-ChildItem -Recurse $runtime | Select-Object -First 80 FullName
+          Write-Host "Managed KDev runtime contents:"
+          Get-ChildItem -Recurse $runtime | Select-Object -First 160 FullName
 
       - name: Build Windows installers
         run: npx tauri build --bundles nsis,msi
@@ -124,9 +150,7 @@ jobs:
             $manifestText = Get-Content -Raw $manifestOut
             if ($manifestText -notmatch [regex]::Escape('8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a')) { throw "Built executable is missing the Windows 10/11 supportedOS GUID in its manifest." }
             if ($manifestText -notmatch 'asInvoker') { throw "Built executable manifest does not declare asInvoker execution level." }
-          } else {
-            Write-Warning "mt.exe was not found; skipping direct manifest extraction."
-          }
+          } else { Write-Warning "mt.exe was not found; skipping direct manifest extraction." }
 
       - name: Generate release checksums
         shell: pwsh
