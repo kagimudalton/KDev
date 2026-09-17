@@ -30,6 +30,9 @@
     "category": "DeveloperTool",
     "shortDescription": "Portable offline-first development environment",
     "longDescription": "KDev is a portable, offline-first development environment designed to travel with your workspace and runtimes.",
-    "icon": ["icons/icon.ico", "icons/icon.png", "icons/icon-512.png"]
+    "icon": ["icons/icon.ico", "icons/icon.png", "icons/icon-512.png"],
+    "resources": {
+      "../extensions/": "extensions/"
+    }
   }
 }

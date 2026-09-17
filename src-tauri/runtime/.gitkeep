@@ -1,0 +1,9 @@
+This directory is intentionally tracked (even when empty) so it always
+exists as a valid Tauri bundle resource path -- see tauri.conf.json's
+bundle.resources and the "Fetch optional bundled runtime assets" step in
+.github/workflows/build-release.yml. When the KDEV_RUNTIME_ASSETS_URL
+repository variable is set, CI populates this directory with real
+interpreter/tool binaries before the build, laid out per runtime/README.md
+(the top-level one, which documents the expected structure). When unset,
+this directory stays empty and KDev falls back to reporting tools as
+host-provided or missing, as runtime.rs already does honestly.

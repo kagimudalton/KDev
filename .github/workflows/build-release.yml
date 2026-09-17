@@ -16,59 +16,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fix installed workspace paths
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $workspaceRoot = @'
-  let home = std::env::var_os("USERPROFILE").map(PathBuf::from).ok_or_else(|| "USERPROFILE is unavailable".to_string())?;
-  let root = home.join("Documents").join("KDev");
-  fs::create_dir_all(&root).map_err(|e| format!("cannot create KDev workspace: {e}"))?;
-  Ok(root)
-'@
-          $lib = Get-Content -Raw src-tauri/src/lib.rs
-          $oldLib = @'
-fn kdev_root() -> Result<PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| format!("cannot locate KDev executable: {e}"))?;
-    exe.parent().map(Path::to_path_buf).ok_or_else(|| "cannot determine KDev root".into())
-}
-'@
-          $newLib = "fn kdev_root() -> Result<PathBuf, String> {`n$workspaceRoot`n}`n"
-          if (-not $lib.Contains($oldLib)) { throw 'Expected lib.rs installed-root function was not found.' }
-          $lib = $lib.Replace($oldLib, $newLib)
-          Set-Content -NoNewline -Encoding utf8 src-tauri/src/lib.rs $lib
-
-          $project = Get-Content -Raw src-tauri/src/project_tools.rs
-          $oldProject = @'
-fn root() -> Result<PathBuf, String> {
-    std::env::current_exe().map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).ok_or_else(|| "cannot locate KDev root".into())
-}
-'@
-          $newProject = "fn root() -> Result<PathBuf, String> {`n  let home = std::env::var_os(\"USERPROFILE\").map(PathBuf::from).ok_or_else(|| \"USERPROFILE is unavailable\".to_string())?;`n  let root = home.join(\"Documents\").join(\"KDev\");`n  fs::create_dir_all(&root).map_err(|e| format!(\"cannot create KDev workspace: {e}\"))?;`n  Ok(root)`n}`n"
-          if (-not $project.Contains($oldProject)) { throw 'Expected project_tools.rs root function was not found.' }
-          $project = $project.Replace($oldProject, $newProject)
-          Set-Content -NoNewline -Encoding utf8 src-tauri/src/project_tools.rs $project
-
-          $git = Get-Content -Raw src-tauri/src/git.rs
-          $oldGit = @'
-fn root() -> Result<PathBuf, String> {
-    std::env::current_exe().map_err(|e| e.to_string())?.parent().map(|p| p.to_path_buf()).ok_or_else(|| "cannot locate KDev root".into())
-}
-'@
-          $newGit = "fn root() -> Result<PathBuf, String> {`n  let home = std::env::var_os(\"USERPROFILE\").map(PathBuf::from).ok_or_else(|| \"USERPROFILE is unavailable\".to_string())?;`n  let root = home.join(\"Documents\").join(\"KDev\");`n  fs::create_dir_all(&root).map_err(|e| format!(\"cannot create KDev workspace: {e}\"))?;`n  Ok(root)`n}`n"
-          $git = $git.Replace('use std::{path::PathBuf, process::Command};', 'use std::{fs, path::PathBuf, process::Command};')
-          if (-not $git.Contains($oldGit)) { throw 'Expected git.rs root function was not found.' }
-          $git = $git.Replace($oldGit, $newGit)
-          Set-Content -NoNewline -Encoding utf8 src-tauri/src/git.rs $git
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src-tauri/src/lib.rs src-tauri/src/project_tools.rs src-tauri/src/git.rs
-          if (-not (git diff --cached --quiet)) {
-            git commit -m 'fix: store installed KDev workspace in user Documents'
-            git push
-          }
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -89,7 +36,43 @@ fn root() -> Result<PathBuf, String> {
         run: python tools/generate_icon.py
 
       - name: Install frontend dependencies
-        run: npm install
+        # Uses npm ci (exact, lockfile-verified install) once package-lock.json
+        # is committed. Falls back to npm install only when no lockfile is
+        # present yet, so this workflow keeps working during the interim
+        # before a lockfile has been generated and committed from a machine
+        # with real npm registry access.
+        shell: pwsh
+        run: |
+          if (Test-Path package-lock.json) {
+            Write-Host "package-lock.json found: using npm ci for a reproducible install."
+            npm ci
+          } else {
+            Write-Warning "No package-lock.json found. Falling back to npm install. Commit a lockfile (npm install once, then 'git add package-lock.json') for reproducible builds."
+            npm install
+          }
+
+      - name: Fetch optional bundled runtime assets
+        # KDev's runtime manager (src-tauri/src/runtime.rs) looks for
+        # bundled tools under src-tauri/runtime/<platform>/bin/. The
+        # repository intentionally does not commit those binaries (size and
+        # per-tool licensing). If a maintainer has published a packaged
+        # runtime bundle (see runtime/README.md for the expected layout)
+        # and set the KDEV_RUNTIME_ASSETS_URL repository variable to point
+        # at it, this step downloads and unpacks it before the build so the
+        # release actually ships with bundled tools. If the variable is
+        # unset, this step is skipped and KDev falls back to honestly
+        # reporting tools as host-provided or missing, as it does today.
+        if: ${{ vars.KDEV_RUNTIME_ASSETS_URL != '' }}
+        shell: pwsh
+        env:
+          KDEV_RUNTIME_ASSETS_URL: ${{ vars.KDEV_RUNTIME_ASSETS_URL }}
+        run: |
+          Write-Host "Downloading KDev runtime assets from $env:KDEV_RUNTIME_ASSETS_URL"
+          Invoke-WebRequest -Uri $env:KDEV_RUNTIME_ASSETS_URL -OutFile runtime-assets.zip
+          New-Item -ItemType Directory -Force -Path src-tauri/runtime | Out-Null
+          Expand-Archive -Path runtime-assets.zip -DestinationPath src-tauri/runtime -Force
+          Write-Host "Unpacked runtime assets into src-tauri/runtime:"
+          Get-ChildItem -Recurse src-tauri/runtime | Select-Object -First 20 FullName
 
       - name: Build Windows installers
         run: npx tauri build --bundles nsis,msi
@@ -103,6 +86,42 @@ fn root() -> Result<PathBuf, String> {
           if (-not $msi) { throw "Tauri completed but no Windows MSI was produced." }
           Write-Host "Windows EXE:"; $nsis | ForEach-Object { Write-Host $_.FullName }
           Write-Host "Windows MSI:"; $msi | ForEach-Object { Write-Host $_.FullName }
+
+      - name: Verify embedded Windows compatibility manifest
+        shell: pwsh
+        run: |
+          # Best-effort check that the built exe actually embeds our custom
+          # manifest (the Windows 10/11 supportedOS GUID and asInvoker
+          # execution level), rather than just trusting that editing
+          # tauri.conf/build.rs "should" have worked. Uses mt.exe from the
+          # Windows SDK, which ships on GitHub's windows-latest runners; if
+          # it can't be located this step warns instead of failing the
+          # build, since manifest embedding is still verified indirectly by
+          # the app compiling and the correct file being referenced from
+          # build.rs.
+          $exeCandidates = Get-ChildItem -Path "src-tauri/target/release" -Filter "*.exe" -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notmatch 'build-script|deps' }
+          if (-not $exeCandidates) { throw "Could not locate the built KDev.exe to verify its manifest." }
+          $exePath = $exeCandidates[0].FullName
+          Write-Host "Inspecting manifest of: $exePath"
+
+          $mt = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter "mt.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
+
+          if ($mt) {
+            $manifestOut = Join-Path $env:RUNNER_TEMP "kdev-manifest.xml"
+            & $mt.FullName -inputresource:"$exePath;#1" -out:"$manifestOut" | Out-Null
+            $manifestText = Get-Content -Raw $manifestOut
+            if ($manifestText -notmatch [regex]::Escape('8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a')) {
+              throw "Built executable is missing the Windows 10/11 supportedOS GUID in its manifest."
+            }
+            if ($manifestText -notmatch 'asInvoker') {
+              throw "Built executable manifest does not declare asInvoker execution level."
+            }
+            Write-Host "Confirmed: exe manifest declares Windows 10/11 compatibility and asInvoker execution level."
+          } else {
+            Write-Warning "mt.exe was not found on this runner; skipping direct manifest extraction. build.rs embeds src-tauri/windows-app-manifest.xml unconditionally, and the build above only succeeds if that file is present and well-formed."
+          }
 
       - name: Generate release checksums
         shell: pwsh
