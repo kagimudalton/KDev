@@ -3,17 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::{AppHandle, Manager};
 
-/// Every place KDev is willing to look for its own bundled copy of a tool,
-/// in priority order, before it will even consider the host machine:
-///   1. The Tauri resource directory (tools shipped via `bundle.resources`
-///      in a packaged release).
-///   2. A `runtime/` folder next to the running executable (the layout
-///      documented in `runtime/README.md`, used for a portable, unpacked
-///      distribution carried on removable media).
-///   3. `runtime/` inside KDev's own writable data root, so a user or an
-///      administrator can drop in an external runtime package after
-///      install without repackaging the whole application (see "Portable
-///      tooling": runtimes may ship as optional external assets).
+/// Every place KDev is willing to look for its own runtime tools.
+/// Host PATH lookup is intentionally disabled: KDev must execute through its
+/// own runtime bundle so projects behave consistently on machines that do
+/// not have Python/Node installed.
 fn runtime_roots(app: &AppHandle, kdev_root: &Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(resource_dir) = app.path().resource_dir() {
@@ -45,28 +38,39 @@ fn platform_subdirs() -> &'static [&'static str] {
 }
 
 fn bundled_executable(roots: &[PathBuf], tool: &str) -> Option<PathBuf> {
-    let exe_name = if cfg!(windows) { format!("{tool}.exe") } else { tool.to_string() };
+    let names = if cfg!(windows) {
+        vec![format!("{tool}.exe"), format!("{tool}.cmd"), format!("{tool}.bat")]
+    } else {
+        vec![tool.to_string()]
+    };
+
     for root in roots {
         for platform in platform_subdirs() {
-            let candidate = root.join(platform).join("bin").join(&exe_name);
-            if candidate.is_file() {
-                return Some(candidate);
+            let platform_root = root.join(platform);
+            for dir in [
+                platform_root.join("bin"),
+                platform_root.join("node-global"),
+                platform_root.join("node-global").join("bin"),
+            ] {
+                for name in &names {
+                    let candidate = dir.join(name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
             }
         }
-        let candidate = root.join("bin").join(&exe_name);
-        if candidate.is_file() {
-            return Some(candidate);
+
+        for dir in [root.join("bin"), root.join("node-global"), root.join("node-global").join("bin")] {
+            for name in &names {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
         }
     }
     None
-}
-
-fn host_tool_available(tool: &str) -> bool {
-    Command::new(tool)
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq)]
@@ -81,7 +85,7 @@ impl RuntimeSource {
     fn label(self) -> &'static str {
         match self {
             RuntimeSource::Bundled => "KDev bundled runtime",
-            RuntimeSource::Host => "Host system",
+            RuntimeSource::Host => "Host system (disabled)",
             RuntimeSource::Missing => "KDev runtime not installed",
         }
     }
@@ -92,18 +96,13 @@ pub struct ResolvedTool {
     pub source: RuntimeSource,
 }
 
-/// Resolves the executable KDev should actually invoke for `tool`: a
-/// bundled copy first, then a host copy, tracking which one was used so
-/// every caller -- and ultimately the UI -- can be honest about where a
-/// tool came from instead of implying everything is portable when it is
-/// really just whatever happens to be on the Windows PATH.
+/// Resolve only KDev-owned binaries. We deliberately do not fall back to the
+/// Windows PATH: doing so makes a supposedly portable project silently depend
+/// on whatever Python/Node version happens to be installed on the host.
 pub fn resolve_tool(app: &AppHandle, kdev_root: &Path, tool: &str) -> ResolvedTool {
     let roots = runtime_roots(app, kdev_root);
     if let Some(path) = bundled_executable(&roots, tool) {
         return ResolvedTool { executable: path, source: RuntimeSource::Bundled };
-    }
-    if host_tool_available(tool) {
-        return ResolvedTool { executable: PathBuf::from(tool), source: RuntimeSource::Host };
     }
     ResolvedTool { executable: PathBuf::from(tool), source: RuntimeSource::Missing }
 }
@@ -128,7 +127,7 @@ fn tool_status(app: &AppHandle, kdev_root: &Path, tool: &str, label: &str, versi
             ready: false,
             source: RuntimeSource::Missing,
             source_label: RuntimeSource::Missing.label().into(),
-            detail: format!("{label} was not found in the KDev runtime directory or on the host PATH."),
+            detail: format!("{label} is not installed in KDev's bundled runtime."),
         };
     }
     match Command::new(&resolved.executable).args(version_args).output() {
@@ -153,8 +152,8 @@ fn tool_status(app: &AppHandle, kdev_root: &Path, tool: &str, label: &str, versi
                 label: label.into(),
                 ready: false,
                 source: resolved.source,
-                source_label: format!("{} (not responding)", resolved.source.label()),
-                detail: if err.is_empty() { "The tool did not report a version.".into() } else { err },
+                source_label: resolved.source.label().into(),
+                detail: if err.is_empty() { "The bundled tool did not report a version.".into() } else { err },
             }
         }
         Err(e) => ToolStatus {
@@ -168,10 +167,6 @@ fn tool_status(app: &AppHandle, kdev_root: &Path, tool: &str, label: &str, versi
     }
 }
 
-/// The full Doctor report for every tool KDev's UI understands. Kept in one
-/// place so the main Doctor panel, the Power Panel, and the Finish Center
-/// all report identical, honest results instead of three different ad hoc
-/// shell probes.
 pub fn doctor_report(app: &AppHandle, kdev_root: &Path) -> Vec<ToolStatus> {
     vec![
         tool_status(app, kdev_root, "python", "Python", &["--version"]),
@@ -180,5 +175,6 @@ pub fn doctor_report(app: &AppHandle, kdev_root: &Path) -> Vec<ToolStatus> {
         tool_status(app, kdev_root, "git", "Git", &["--version"]),
         tool_status(app, kdev_root, "ruff", "Ruff", &["--version"]),
         tool_status(app, kdev_root, "prettier", "Prettier", &["--version"]),
+        tool_status(app, kdev_root, "tsx", "tsx", &["--version"]),
     ]
 }
