@@ -9,11 +9,17 @@ import KDevPowerPanel from "./KDevPowerPanel";
 import FinishCenter from "./FinishCenter";
 import "./styles.css";
 
-const editorWorker = new Worker(new URL("monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url), { type: "module" });
-const jsonWorker = new Worker(new URL("monaco-editor/esm/vs/language/json/json.worker.js", import.meta.url), { type: "module" });
-const cssWorker = new Worker(new URL("monaco-editor/esm/vs/language/css/css.worker.js", import.meta.url), { type: "module" });
-const htmlWorker = new Worker(new URL("monaco-editor/esm/vs/language/html/html.worker.js", import.meta.url), { type: "module" });
-const tsWorker = new Worker(new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", import.meta.url), { type: "module" });
+import editorWorkerUrl from "monaco-editor/esm/vs/editor/editor.worker.js?url";
+import jsonWorkerUrl from "monaco-editor/esm/vs/language/json/json.worker.js?url";
+import cssWorkerUrl from "monaco-editor/esm/vs/language/css/css.worker.js?url";
+import htmlWorkerUrl from "monaco-editor/esm/vs/language/html/html.worker.js?url";
+import tsWorkerUrl from "monaco-editor/esm/vs/language/typescript/ts.worker.js?url";
+
+const editorWorker = new Worker(editorWorkerUrl, { type: "module" });
+const jsonWorker = new Worker(jsonWorkerUrl, { type: "module" });
+const cssWorker = new Worker(cssWorkerUrl, { type: "module" });
+const htmlWorker = new Worker(htmlWorkerUrl, { type: "module" });
+const tsWorker = new Worker(tsWorkerUrl, { type: "module" });
 
 (self as typeof self & { MonacoEnvironment?: { getWorker?: (workerId: string, label: string) => Worker } }).MonacoEnvironment = {
   getWorker(_: string, label: string) {
