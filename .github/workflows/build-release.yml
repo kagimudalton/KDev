@@ -150,6 +150,107 @@ jobs:
             if ($manifestText -notmatch 'asInvoker') { throw "Built executable manifest does not declare asInvoker execution level." }
           } else { Write-Warning "mt.exe was not found; skipping direct manifest extraction." }
 
+      - name: Build portable Windows package
+        shell: pwsh
+        run: |
+          $portable = Join-Path $env:RUNNER_TEMP "KDev-Windows-x64-Portable"
+          $portableRuntime = Join-Path $portable "runtime"
+          $portableExtensions = Join-Path $portable "extensions"
+
+          Remove-Item $portable -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $portableRuntime,$portableExtensions | Out-Null
+
+          $appExe = "src-tauri/target/release/KDev.exe"
+          if (-not (Test-Path $appExe)) { throw "Portable package source KDev.exe was not found." }
+
+          Copy-Item $appExe (Join-Path $portable "KDev.exe") -Force
+
+          $managedRuntime = "src-tauri/runtime/windows-x64"
+          if (-not (Test-Path $managedRuntime)) { throw "Managed Windows runtime was not found." }
+          Copy-Item $managedRuntime (Join-Path $portableRuntime "windows-x64") -Recurse -Force
+
+          if (Test-Path "extensions") {
+            Copy-Item "extensions/*" $portableExtensions -Recurse -Force
+          }
+
+          $data = Join-Path $portable "KDevData"
+          New-Item -ItemType Directory -Force -Path (Join-Path $data "workspace/projects") | Out-Null
+
+          # The portable package deliberately keeps KDevData beside KDev.exe.
+          # runtime.rs resolves <exe directory>\\runtime\\... first, so the
+          # package remains independent of the build machine and host PATH.
+          $readme = @"
+KDev Windows x64 Portable
+
+Run KDev.exe directly. No KDev installation is required.
+
+Bundled development runtimes:
+- Python
+- Node.js / npm / npx
+- Git
+- Ruff
+- Prettier
+- tsx
+
+KDev keeps writable workspace data under KDevData beside the executable when
+the folder is writable, making the whole directory suitable for removable media.
+"@
+          Set-Content -Path (Join-Path $portable "README.txt") -Value $readme -Encoding utf8
+
+          $zip = "KDev-Windows-x64-Portable.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $portable "*") -DestinationPath $zip -CompressionLevel Optimal
+
+          if (-not (Test-Path $zip)) { throw "Portable ZIP was not created." }
+          $size = (Get-Item $zip).Length
+          if ($size -lt 1000000) { throw "Portable ZIP is unexpectedly small ($size bytes)." }
+          Write-Host "Portable package created: $zip ($size bytes)"
+
+      - name: Verify portable package contents
+        shell: pwsh
+        run: |
+          $portable = Join-Path $env:RUNNER_TEMP "KDev-Windows-x64-Portable"
+          $required = @(
+            "KDev.exe",
+            "runtime/windows-x64/bin/python.exe",
+            "runtime/windows-x64/bin/node.exe",
+            "runtime/windows-x64/bin/npm.cmd",
+            "runtime/windows-x64/bin/ruff.exe",
+            "runtime/windows-x64/git/cmd/git.exe",
+            "runtime/windows-x64/node-global/node_modules/.bin/prettier.cmd",
+            "runtime/windows-x64/node-global/node_modules/.bin/tsx.cmd",
+            "KDevData/workspace/projects",
+            "README.txt"
+          )
+          foreach ($item in $required) {
+            $path = Join-Path $portable $item
+            if (-not (Test-Path $path)) { throw "Portable package is missing: $item" }
+          }
+
+          & (Join-Path $portable "runtime/windows-x64/bin/python.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "Portable Python self-test failed." }
+          & (Join-Path $portable "runtime/windows-x64/bin/node.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "Portable Node.js self-test failed." }
+          & (Join-Path $portable "runtime/windows-x64/git/cmd/git.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "Portable Git self-test failed." }
+          & (Join-Path $portable "runtime/windows-x64/bin/ruff.exe") --version
+          if ($LASTEXITCODE -ne 0) { throw "Portable Ruff self-test failed." }
+
+      - name: Generate portable package checksum
+        shell: pwsh
+        run: |
+          (Get-FileHash -Algorithm SHA256 "KDev-Windows-x64-Portable.zip").Hash + "  KDev-Windows-x64-Portable.zip" | Set-Content -Encoding ascii "KDev-Windows-x64-Portable.zip.sha256"
+
+      - name: Upload portable Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: KDev-Windows-x64-Portable
+          path: |
+            KDev-Windows-x64-Portable.zip
+            KDev-Windows-x64-Portable.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Generate release checksums
         shell: pwsh
         run: |
