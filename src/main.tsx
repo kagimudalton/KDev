@@ -3,41 +3,32 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker.js?worker";
-import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker.js?worker";
-import cssWorker from "monaco-editor/esm/vs/language/css/css.worker.js?worker";
-import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker.js?worker";
-import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker.js?worker";
 import App from "./App";
 import SystemCenter from "./SystemCenter";
 import KDevPowerPanel from "./KDevPowerPanel";
 import FinishCenter from "./FinishCenter";
 import "./styles.css";
 
-// Keep Monaco completely inside the Vite/Tauri bundle. @monaco-editor/react
-// otherwise defaults to the Monaco loader's CDN path, which is unsuitable for
-// an offline desktop IDE and was the reason the editor could remain on
-// "Loading…" when the machine had no network access.
-(self as typeof self & { MonacoEnvironment?: unknown }).MonacoEnvironment = {
-  getWorker(_: unknown, label: string) {
-    if (label === "json") return new jsonWorker();
-    if (label === "css" || label === "scss" || label === "less") return new cssWorker();
-    if (label === "html" || label === "handlebars" || label === "razor") return new htmlWorker();
-    if (label === "typescript" || label === "javascript") return new tsWorker();
-    return new editorWorker();
+const editorWorker = new Worker(new URL("monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url), { type: "module" });
+const jsonWorker = new Worker(new URL("monaco-editor/esm/vs/language/json/json.worker.js", import.meta.url), { type: "module" });
+const cssWorker = new Worker(new URL("monaco-editor/esm/vs/language/css/css.worker.js", import.meta.url), { type: "module" });
+const htmlWorker = new Worker(new URL("monaco-editor/esm/vs/language/html/html.worker.js", import.meta.url), { type: "module" });
+const tsWorker = new Worker(new URL("monaco-editor/esm/vs/language/typescript/ts.worker.js", import.meta.url), { type: "module" });
+
+(self as typeof self & { MonacoEnvironment?: { getWorker?: (workerId: string, label: string) => Worker } }).MonacoEnvironment = {
+  getWorker(_: string, label: string) {
+    if (label === "json") return jsonWorker;
+    if (label === "css" || label === "scss" || label === "less") return cssWorker;
+    if (label === "html" || label === "handlebars" || label === "razor") return htmlWorker;
+    if (label === "typescript" || label === "javascript") return tsWorker;
+    return editorWorker;
   }
 };
 loader.config({ monaco });
-
-// Initialize Monaco once at application startup so the first editor tab does
-// not race the loader/worker setup.
 void loader.init().catch(() => undefined);
 
 type SecurityState = { configured: boolean; config_path: string };
 
-/// Gates the whole app behind the master password when one has been
-/// configured. Unlocking is per-session (not persisted to disk): closing
-/// and reopening KDev with a configured master password always asks again.
 function LockScreen({ onUnlock }: { onUnlock: () => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -62,14 +53,8 @@ function LockScreen({ onUnlock }: { onUnlock: () => void }) {
     <div className="lock-card">
       <h2>KDev is locked</h2>
       <p>Enter your master password to open this workspace.</p>
-      <input
-        type="password"
-        autoFocus
-        value={password}
-        onChange={e => setPassword(e.target.value)}
-        onKeyDown={e => { if (e.key === "Enter") void unlock(); }}
-        placeholder="Master password"
-      />
+      <input type="password" autoFocus value={password} onChange={e => setPassword(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") void unlock(); }} placeholder="Master password" />
       {error && <span className="lock-error">{error}</span>}
       <button disabled={busy || !password} onClick={() => void unlock()}>{busy ? "Checking…" : "Unlock"}</button>
     </div>
@@ -88,11 +73,8 @@ function Root() {
       .catch(() => setSecurityConfigured(false));
   }, []);
 
-  // Nothing configured yet, or still checking: don't block the workspace.
   if (securityConfigured === null) return null;
-  if (securityConfigured && !unlocked) {
-    return <LockScreen onUnlock={() => setUnlocked(true)} />;
-  }
+  if (securityConfigured && !unlocked) return <LockScreen onUnlock={() => setUnlocked(true)} />;
 
   return <>
     <App />
