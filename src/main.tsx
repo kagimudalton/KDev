@@ -9,17 +9,11 @@ import KDevPowerPanel from "./KDevPowerPanel";
 import FinishCenter from "./FinishCenter";
 import "./styles.css";
 
-import editorWorkerUrl from "monaco-editor/esm/vs/editor/editor.worker.js?url";
-import jsonWorkerUrl from "monaco-editor/esm/vs/language/json/json.worker.js?url";
-import cssWorkerUrl from "monaco-editor/esm/vs/language/css/css.worker.js?url";
-import htmlWorkerUrl from "monaco-editor/esm/vs/language/html/html.worker.js?url";
-import tsWorkerUrl from "monaco-editor/esm/vs/language/typescript/ts.worker.js?url";
-
-const editorWorker = new Worker(editorWorkerUrl, { type: "module" });
-const jsonWorker = new Worker(jsonWorkerUrl, { type: "module" });
-const cssWorker = new Worker(cssWorkerUrl, { type: "module" });
-const htmlWorker = new Worker(htmlWorkerUrl, { type: "module" });
-const tsWorker = new Worker(tsWorkerUrl, { type: "module" });
+import editorWorker from "monaco-editor/esm/vs/editor/editor.worker.js?worker";
+import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker.js?worker";
+import cssWorker from "monaco-editor/esm/vs/language/css/css.worker.js?worker";
+import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker.js?worker";
+import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker.js?worker";
 
 (self as typeof self & { MonacoEnvironment?: { getWorker?: (workerId: string, label: string) => Worker } }).MonacoEnvironment = {
   getWorker(_: string, label: string) {
