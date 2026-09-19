@@ -69,7 +69,7 @@ jobs:
           $pythonExe = Get-ChildItem -Path $pythonRoot -Recurse -Filter "python.exe" -File | Select-Object -First 1
           if (-not $pythonExe) { throw "Managed Python executable was not found after uv installation." }
 
-          & $uv pip install --python $pythonExe.FullName pip
+          & $uv pip install --python $pythonExe.FullName --system pip
           if ($LASTEXITCODE -ne 0) { throw "Managed pip installation failed." }
           $pythonHome = Split-Path $pythonExe.FullName -Parent
           Copy-Item (Join-Path $pythonHome "*") $bin -Recurse -Force
