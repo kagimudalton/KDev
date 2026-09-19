@@ -73,14 +73,11 @@ jobs:
           $pythonExe = Get-ChildItem -Path $pythonRoot -Recurse -Filter "python.exe" -File | Select-Object -First 1
           if (-not $pythonExe) { throw "Managed Python executable was not found after uv installation." }
 
-          # Seed real pip into the managed interpreter so normal Python project
-          # workflows remain available inside KDev without using host Python.
           & $uv pip install --python $pythonExe.FullName pip
           if ($LASTEXITCODE -ne 0) { throw "Managed pip installation failed." }
           $pythonHome = Split-Path $pythonExe.FullName -Parent
           Copy-Item (Join-Path $pythonHome "*") $bin -Recurse -Force
 
-          # KDev-owned Node.js. npm and npx are included by Node.js itself.
           $nodeZip = Join-Path $tmp "node.zip"
           $nodeExtract = Join-Path $tmp "node"
           Invoke-WebRequest -Uri "https://nodejs.org/dist/v22.18.0/node-v22.18.0-win-x64.zip" -OutFile $nodeZip
@@ -88,9 +85,6 @@ jobs:
           $nodeRoot = Get-ChildItem $nodeExtract -Directory | Select-Object -First 1
           Copy-Item (Join-Path $nodeRoot.FullName "*") $bin -Recurse -Force
 
-          # Git for Windows: keep the complete portable Git tree so git.exe
-          # retains its DLLs and support files. MinGit is the small official
-          # distribution intended for embedding/portable use.
           $gitApi = Invoke-RestMethod -Headers @{ "User-Agent" = "KDev-CI" } -Uri "https://api.github.com/repos/git-for-windows/git/releases/latest"
           $gitAsset = $gitApi.assets | Where-Object { $_.name -like "MinGit-*-64-bit.zip" } | Select-Object -First 1
           if (-not $gitAsset) { throw "Could not find the latest MinGit 64-bit asset." }
@@ -98,21 +92,16 @@ jobs:
           Invoke-WebRequest -Headers @{ "User-Agent" = "KDev-CI" } -Uri $gitAsset.browser_download_url -OutFile $gitZip
           Expand-Archive -Path $gitZip -DestinationPath $gitRoot -Force
 
-          # Ruff is installed into a KDev-owned prefix, then its executable is
-          # copied into the managed bin directory.
           & $uv pip install --python $pythonExe.FullName --target (Join-Path $ruffRoot "site") ruff
           if ($LASTEXITCODE -ne 0) { throw "Bundled Ruff installation failed." }
           $ruffExe = Get-ChildItem -Path $ruffRoot -Recurse -Filter "ruff.exe" -File | Select-Object -First 1
           if (-not $ruffExe) { throw "Bundled Ruff executable was not produced." }
           Copy-Item $ruffExe.FullName (Join-Path $bin "ruff.exe") -Force
 
-          # Prettier + tsx are installed into KDev's private Node prefix.
           $env:Path = "$bin;$(Join-Path $nodeGlobal 'node_modules/.bin');$env:Path"
           & (Join-Path $bin "npm.cmd") install --prefix $nodeGlobal --no-save prettier@3.6.2 tsx@4.20.3
           if ($LASTEXITCODE -ne 0) { throw "Bundled Node tooling installation failed." }
 
-          # Self-tests: every execution dependency used by KDev must exist in
-          # the bundle before Tauri packages it.
           & (Join-Path $bin "python.exe") --version
           if ($LASTEXITCODE -ne 0) { throw "Bundled Python failed its self-test." }
           & (Join-Path $bin "python.exe") -m pip --version
@@ -183,3 +172,5 @@ jobs:
             src-tauri/target/release/bundle/msi/*.sha256
           if-no-files-found: error
           retention-days: 14
+
+# KDev CI trigger validation: keep this workflow push-triggered on main.
