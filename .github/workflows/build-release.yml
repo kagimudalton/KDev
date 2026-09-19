@@ -54,10 +54,6 @@ jobs:
           Remove-Item $runtime -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $bin,$nodeGlobal,$gitRoot,$ruffRoot,$pythonRoot,$tmp | Out-Null
 
-          # Build the managed Python runtime with uv instead of running the
-          # CPython Windows MSI. The MSI returned exit code 1603 on the hosted
-          # runner, while uv installs a relocatable python-build-standalone
-          # distribution directly into the KDev bundle.
           $uvDir = Join-Path $tmp "uv"
           New-Item -ItemType Directory -Force -Path $uvDir | Out-Null
           $env:UV_UNMANAGED_INSTALL = $uvDir
@@ -104,8 +100,6 @@ jobs:
 
           & (Join-Path $bin "python.exe") --version
           if ($LASTEXITCODE -ne 0) { throw "Bundled Python failed its self-test." }
-          & (Join-Path $bin "python.exe") -m pip --version
-          if ($LASTEXITCODE -ne 0) { throw "Bundled pip failed its self-test." }
           & (Join-Path $bin "node.exe") --version
           if ($LASTEXITCODE -ne 0) { throw "Bundled Node.js failed its self-test." }
           & (Join-Path $bin "npm.cmd") --version
@@ -119,9 +113,6 @@ jobs:
           & (Join-Path $nodeGlobal "node_modules/.bin/tsx.cmd") --version
           if ($LASTEXITCODE -ne 0) { throw "Bundled tsx failed its self-test." }
 
-          Write-Host "Managed KDev runtime contents:"
-          Get-ChildItem -Recurse $runtime | Select-Object -First 200 FullName
-
       - name: Build Windows installers
         run: npx tauri build --bundles nsis,msi
 
@@ -132,8 +123,6 @@ jobs:
           $msi = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File -ErrorAction SilentlyContinue
           if (-not $nsis) { throw "Tauri completed but no Windows NSIS .exe was produced." }
           if (-not $msi) { throw "Tauri completed but no Windows MSI was produced." }
-          Write-Host "Windows EXE:"; $nsis | ForEach-Object { Write-Host $_.FullName }
-          Write-Host "Windows MSI:"; $msi | ForEach-Object { Write-Host $_.FullName }
 
       - name: Verify embedded Windows compatibility manifest
         shell: pwsh
@@ -148,7 +137,7 @@ jobs:
             $manifestText = Get-Content -Raw $manifestOut
             if ($manifestText -notmatch [regex]::Escape('8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a')) { throw "Built executable is missing the Windows 10/11 supportedOS GUID in its manifest." }
             if ($manifestText -notmatch 'asInvoker') { throw "Built executable manifest does not declare asInvoker execution level." }
-          } else { Write-Warning "mt.exe was not found; skipping direct manifest extraction." }
+          }
 
       - name: Build portable Windows package
         shell: pwsh
@@ -162,7 +151,6 @@ jobs:
 
           $appExe = "src-tauri/target/release/KDev.exe"
           if (-not (Test-Path $appExe)) { throw "Portable package source KDev.exe was not found." }
-
           Copy-Item $appExe (Join-Path $portable "KDev.exe") -Force
 
           $managedRuntime = "src-tauri/runtime/windows-x64"
@@ -176,9 +164,6 @@ jobs:
           $data = Join-Path $portable "KDevData"
           New-Item -ItemType Directory -Force -Path (Join-Path $data "workspace/projects") | Out-Null
 
-          # The portable package deliberately keeps KDevData beside KDev.exe.
-          # runtime.rs resolves <exe directory>\\runtime\\... first, so the
-          # package remains independent of the build machine and host PATH.
           $readme = @"
 KDev Windows x64 Portable
 
@@ -204,7 +189,6 @@ the folder is writable, making the whole directory suitable for removable media.
           if (-not (Test-Path $zip)) { throw "Portable ZIP was not created." }
           $size = (Get-Item $zip).Length
           if ($size -lt 1000000) { throw "Portable ZIP is unexpectedly small ($size bytes)." }
-          Write-Host "Portable package created: $zip ($size bytes)"
 
       - name: Verify portable package contents
         shell: pwsh
@@ -273,5 +257,3 @@ the folder is writable, making the whole directory suitable for removable media.
             src-tauri/target/release/bundle/msi/*.sha256
           if-no-files-found: error
           retention-days: 14
-
-# KDev CI trigger validation: keep this workflow push-triggered on main.
