@@ -69,8 +69,9 @@ jobs:
           $pythonExe = Get-ChildItem -Path $pythonRoot -Recurse -Filter "python.exe" -File | Select-Object -First 1
           if (-not $pythonExe) { throw "Managed Python executable was not found after uv installation." }
 
-          & $uv pip install --python $pythonExe.FullName --system pip
-          if ($LASTEXITCODE -ne 0) { throw "Managed pip installation failed." }
+          # uv-managed Python is intentionally marked externally managed.
+          # KDev does not need pip inside the bundled runtime; Python itself is
+          # the runtime, while Ruff is installed separately into its own target.
           $pythonHome = Split-Path $pythonExe.FullName -Parent
           Copy-Item (Join-Path $pythonHome "*") $bin -Recurse -Force
 
