@@ -164,22 +164,22 @@ jobs:
           $data = Join-Path $portable "KDevData"
           New-Item -ItemType Directory -Force -Path (Join-Path $data "workspace/projects") | Out-Null
 
-          $readme = @"
-KDev Windows x64 Portable
-
-Run KDev.exe directly. No KDev installation is required.
-
-Bundled development runtimes:
-- Python
-- Node.js / npm / npx
-- Git
-- Ruff
-- Prettier
-- tsx
-
-KDev keeps writable workspace data under KDevData beside the executable when
-the folder is writable, making the whole directory suitable for removable media.
-"@
+          $readme = @(
+            "KDev Windows x64 Portable",
+            "",
+            "Run KDev.exe directly. No KDev installation is required.",
+            "",
+            "Bundled development runtimes:",
+            "- Python",
+            "- Node.js / npm / npx",
+            "- Git",
+            "- Ruff",
+            "- Prettier",
+            "- tsx",
+            "",
+            "KDev keeps writable workspace data under KDevData beside the executable when",
+            "the folder is writable, making the whole directory suitable for removable media."
+          )
           Set-Content -Path (Join-Path $portable "README.txt") -Value $readme -Encoding utf8
 
           $zip = "KDev-Windows-x64-Portable.zip"
